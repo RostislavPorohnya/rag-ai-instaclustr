@@ -100,7 +100,7 @@ resource "aws_instance" "embedding_host" {
     sudo mount -t cifs //${tostring(tolist(aws_fsx_ontap_storage_virtual_machine.bedrocksvm.endpoints[0].smb[0].ip_addresses)[0])}/c$/${aws_fsx_ontap_volume.bedrockrag.name} /tmp/data -o user=admin,password="${random_string.fsx_password.result}",domain=bedrock-01.com,iocharset=utf8,mapchars,mfsymlinks
     sudo mount -t nfs ${aws_fsx_ontap_volume.ragdb.storage_virtual_machine_id}.${aws_fsx_ontap_volume.ragdb.file_system_id}.fsx.${var.aws_region}.amazonaws.com:${aws_fsx_ontap_volume.ragdb.junction_path} /tmp/db
     sudo aws ecr get-login-password --region ${var.aws_region} | sudo docker login --username AWS --password-stdin ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com
-    sudo docker run -d -v /tmp/data:/opt/netapp/ai/data -v /tmp/db:/opt/netapp/ai/db -e ENV_REGION='${var.aws_region}' -e ENV_OPEN_SEARCH_SERVERLESS_COLLECTION_NAME='${aws_opensearchserverless_collection.fsxnragvector.name}' ${aws_ecr_repository.fsxnragembed.repository_url}:latest 
+    sudo docker run -d -v /tmp/data:/opt/netapp/ai/data -v /tmp/db:/opt/netapp/ai/db -e ENV_REGION='${var.aws_region}' -e ENV_OPEN_SEARCH_SERVERLESS_COLLECTION_NAME='${var.collection_name}' -e OPEN_SEARCH_HOSTNAME='${instaclustr_opensearch_cluster_v2.example.load_balancer_connection_url}' -e OPENSEARCH_USERNAME='${instaclustr_opensearch_cluster_v2.example.default_username}' -e OPENSEARCH_PASSWORD='${instaclustr_opensearch_cluster_v2.example.default_user_password}' ${aws_ecr_repository.fsxnragembed.repository_url}:latest
     sudo docker run -d -p 8501:8501 -e CHAT_URL='${aws_api_gateway_stage.stage.invoke_url}/${aws_api_gateway_resource.root.path_part}' ${aws_ecr_repository.fsxnragchat.repository_url}:latest
   EOF
 }

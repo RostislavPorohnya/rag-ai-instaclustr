@@ -1,39 +1,51 @@
-import { defaultProvider } from '@aws-sdk/credential-provider-node';
-import {
-    OpenSearchServerlessClient,
-    BatchGetCollectionCommand,
-    CollectionSummary,
-    paginateListCollections
-} from '@aws-sdk/client-opensearchserverless';
+import {getClient} from "../opensearch";
 
-export async function getCollection(region: string, name: string) {
-    const client = getClient(region);
+export async function getCollection(endpoint: string, name: string, username: string, password: string) {
+    const client = getClient(endpoint, username, password);
 
-    const { collectionDetails = [] } = await client.send(new BatchGetCollectionCommand({ names: [name] }));
+    try {
+        const response = await client.search({
+            index: name,
+            body: {
+                query: {
+                    match_all: {}
+                }
+            }
+        });
 
-    if (collectionDetails.length === 0) {
-        throw new Error(`Collection ${name} is not found in region ${region}`);
-    } else {
-        return collectionDetails[0];
+        const hits = response.body.hits;
+        if (!hits || hits.total.value === 0) {
+            console.log(`Collection ${name} exists on endpoint ${endpoint} but is empty.`);
+            return [];  // Return an empty array if no documents are found
+        } else {
+            return hits.hits;
+        }
+    } catch (error) {
+        if (error instanceof Error) {
+            throw new Error(`Failed to get collection from endpoint ${endpoint}: ${error.message}`);
+        } else {
+            throw new Error(`Failed to get collection from endpoint ${endpoint}: ${String(error)}`);
+        }
     }
 }
 
-export async function listCollections(region: string) {
-    const client = getClient(region);
 
-    const paginator = paginateListCollections({ client }, {});
+export async function listCollections(endpoint: string, username: string, password: string): Promise<string[]> {
+    const client = getClient(endpoint, username, password);
 
-    const collections: CollectionSummary[] = [];
-    for await (const { collectionSummaries = [] } of paginator) {
-        collections.push(...collectionSummaries);
+    try {
+        const response = await client.cat.indices({ format: 'json' });
+
+        // Extract index names from the response
+        const collections = response.body.map((index: { index: string }) => index.index);
+
+        return collections;
+    } catch (error) {
+        if (error instanceof Error) {
+            throw new Error(`Failed to list collections from endpoint ${endpoint}: ${error.message}`);
+        } else {
+            throw new Error(`Failed to list collections from endpoint ${endpoint}: ${String(error)}`);
+        }
     }
-
-    return collections;
 }
 
-function getClient(region: string) {
-    return new OpenSearchServerlessClient({
-        region,
-        credentialDefaultProvider: () => defaultProvider({ profile: process.env.PROFILE })
-    });
-}

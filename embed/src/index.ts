@@ -9,10 +9,9 @@ import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { CSVLoader } from '@langchain/community/document_loaders/fs/csv';
 import { TextLoader } from 'langchain/document_loaders/fs/text';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { BedrockEmbeddings } from '@langchain/aws';
 import { Client } from '@opensearch-project/opensearch';
 import pMap from 'p-map';
-import { listCollections } from './aws/opensearchserverless';
 import { bulkDelete, createIndex, getClient, indexDocument, bulkUpdate } from './opensearch';
 import { validate } from './validator';
 import { scan } from './scanner';
@@ -29,6 +28,7 @@ import {
 } from './compare/operations';
 import { Document } from 'langchain/document';
 import { DefaultMetadata, FileMetadata } from './types/metadata';
+import {listCollections} from "./aws/opensearchserverless";
 
 async function main() {
     console.log('Starting...');
@@ -43,8 +43,28 @@ async function main() {
         process.env.OPEN_SEARCH_SERVERLESS_COLLECTION_NAME = process.env.ENV_OPEN_SEARCH_SERVERLESS_COLLECTION_NAME;
     }
 
-    const { REGION, OPEN_SEARCH_SERVERLESS_COLLECTION_NAME, SCANNER_INTERVAL } = process.env;
-    console.log(`Operating in region ${REGION}, collection name ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME}`);
+    // use external host name if provided
+    if (process.env.ENV_OPEN_SEARCH_HOSTNAME) {
+        process.env.OPEN_SEARCH_HOSTNAME = process.env.ENV_OPEN_SEARCH_HOSTNAME;
+    }
+
+    // use external host name if provided
+    if (process.env.ENV_OPENSEARCH_USERNAME) {
+        process.env.OPENSEARCH_USERNAME = process.env.ENV_OPENSEARCH_USERNAME;
+    }
+
+    // use external password if provided
+    if (process.env.ENV_OPENSEARCH_PASSWORD) {
+        process.env.OPENSEARCH_PASSWORD = process.env.ENV_OPENSEARCH_PASSWORD;
+    }
+
+    const { REGION,
+        OPEN_SEARCH_SERVERLESS_COLLECTION_NAME,
+        OPEN_SEARCH_HOSTNAME,
+        OPENSEARCH_USERNAME,
+        OPENSEARCH_PASSWORD,
+        SCANNER_INTERVAL } = process.env;
+    console.log(`Operating in region ${REGION}, collection name ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME}, host name ${OPEN_SEARCH_HOSTNAME}`);
 
     //
     // Validate provided configuration
@@ -57,12 +77,17 @@ async function main() {
     let client: Client;
     const indexName = `${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME}-index`;
 
-    const collections = await listCollections(REGION);
-    const collection = collections.find(({ name }) => name === OPEN_SEARCH_SERVERLESS_COLLECTION_NAME);
+    const os_hostname = `${OPEN_SEARCH_HOSTNAME}`
+    const os_username = `${OPENSEARCH_USERNAME}`
+    const os_password = `${OPENSEARCH_PASSWORD}`
+    const collections = await listCollections(os_hostname, os_username, os_password);
+    const collection = collections.find((value) => {
+        return value === OPEN_SEARCH_SERVERLESS_COLLECTION_NAME;
+    });
 
     if (collection) {
         console.log(`Collection ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME} already exists`);
-        client = getClient(REGION, `https://${collection.id}.${REGION}.aoss.amazonaws.com`);
+        client = getClient(os_hostname, os_username, os_password);
 
         // check if index exists
         const { body } = await client.indices.exists({ index: indexName });

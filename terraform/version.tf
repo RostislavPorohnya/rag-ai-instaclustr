@@ -2,6 +2,10 @@
 terraform {
   required_version = ">= 0.12"
   required_providers {
+    instaclustr = {
+      source  = "instaclustr/instaclustr"
+      version = ">= 2.0.0, < 3.0.0"
+    }
     aws = {
       source  = "hashicorp/aws"
       version = ">= 5.49.0"

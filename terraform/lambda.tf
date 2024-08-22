@@ -27,6 +27,15 @@ resource "aws_iam_role_policy" "lambda_bedrock_rag_retreival_policy" {
     "Version": "2012-10-17",
     "Statement": [
         {
+          Action = [
+            "ec2:CreateNetworkInterface",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DeleteNetworkInterface"
+          ],
+          Effect   = "Allow",
+          Resource = "*"
+        },
+        {
             "Sid": "Bedrock",
             "Effect": "Allow",
             "Action": [
@@ -89,8 +98,15 @@ resource "aws_lambda_function" "bedrock_rag_retreival" {
 
   environment {
     variables = {
-      aoss_host = aws_opensearchserverless_collection.fsxnragvector.collection_endpoint
+      aoss_host = instaclustr_opensearch_cluster_v2.example.load_balancer_connection_url
+      cassandra_hosts = join(",", flatten([for dc in instaclustr_cassandra_cluster_v2.example.data_centre : [for node in dc.nodes : node.public_address]]))
+      os_username = instaclustr_opensearch_cluster_v2.example.default_username
+      os_password = instaclustr_opensearch_cluster_v2.example.default_user_password
     }
+  }
+  vpc_config {
+    subnet_ids         = [module.vpc.private_subnets[0]]
+    security_group_ids = [aws_security_group.fsx_sg.id]
   }
 }
 

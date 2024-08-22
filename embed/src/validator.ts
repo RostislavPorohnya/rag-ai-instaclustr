@@ -1,7 +1,7 @@
 import { lstat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { getFoundationModel } from './aws/bedrock';
-import { getCollection, listCollections } from './aws/opensearchserverless';
+import { listCollections } from './aws/opensearchserverless';
 
 export async function validate() {
     // use external region if provided
@@ -14,7 +14,22 @@ export async function validate() {
         process.env.OPEN_SEARCH_SERVERLESS_COLLECTION_NAME = process.env.ENV_OPEN_SEARCH_SERVERLESS_COLLECTION_NAME;
     }
 
-    const { REGION, BEDROCK_EMBEDDING_MODEL_ID, DATA_DIRECTORY, OPEN_SEARCH_SERVERLESS_COLLECTION_NAME, INTERNAL_DB } =
+    // use external host name if provided
+    if (process.env.ENV_OPEN_SEARCH_HOSTNAME) {
+        process.env.OPEN_SEARCH_HOSTNAME = process.env.ENV_OPEN_SEARCH_HOSTNAME;
+    }
+
+    // use external host name if provided
+    if (process.env.ENV_OPENSEARCH_USERNAME) {
+        process.env.OPENSEARCH_USERNAME = process.env.ENV_OPENSEARCH_USERNAME;
+    }
+
+    // use external host name if provided
+    if (process.env.ENV_OPENSEARCH_PASSWORD) {
+        process.env.OPENSEARCH_PASSWORD = process.env.ENV_OPENSEARCH_PASSWORD;
+    }
+
+    const { REGION, BEDROCK_EMBEDDING_MODEL_ID, DATA_DIRECTORY, OPEN_SEARCH_SERVERLESS_COLLECTION_NAME, OPEN_SEARCH_HOSTNAME, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, INTERNAL_DB } =
         process.env;
 
     // Verify data directory exists
@@ -48,17 +63,14 @@ export async function validate() {
         process.exit(-1);
     }
 
+    const os_hostname = `${OPEN_SEARCH_HOSTNAME}`
+    const os_username = `${OPENSEARCH_USERNAME}`
+    const os_password = `${OPENSEARCH_PASSWORD}`
     // validate existing collection status and type
-    const collections = await listCollections(REGION);
-    const collection = collections.find(({ name }) => name === OPEN_SEARCH_SERVERLESS_COLLECTION_NAME);
+    const collections = await listCollections(os_hostname, os_username, os_password);
+    const collection = collections.find((value) => value === OPEN_SEARCH_SERVERLESS_COLLECTION_NAME);
     if (collection) {
-        const { status, type } = await getCollection(REGION, OPEN_SEARCH_SERVERLESS_COLLECTION_NAME);
-        if (status !== 'ACTIVE' || type !== 'VECTORSEARCH') {
-            console.error(
-                `Collection ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME} in region ${REGION} is no active or not vector search`
-            );
-            process.exit(-1);
-        }
+        console.log(`Collection ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME} in region ${REGION} found successfully.`);
     } else {
         console.error(`Unable to find collection ${OPEN_SEARCH_SERVERLESS_COLLECTION_NAME} in region ${REGION}`);
         process.exit(-1);

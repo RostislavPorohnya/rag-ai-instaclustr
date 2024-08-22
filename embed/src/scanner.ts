@@ -41,7 +41,7 @@ export async function scan(directory: string) {
 
 async function getACL(path: string) {
     try {
-        const response = await execute(`getcifsacl "${path}"`);
+        const response = await execute(`getcifsacl "${path}"`, 100);
 
         const parsedAcl = response
             .split('\n')

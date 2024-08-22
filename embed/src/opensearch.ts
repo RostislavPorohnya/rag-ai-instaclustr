@@ -1,22 +1,14 @@
-import { defaultProvider } from '@aws-sdk/credential-provider-node';
-import { AwsSigv4Signer } from '@opensearch-project/opensearch/aws';
-import { Client } from '@opensearch-project/opensearch';
+import { Client } from "@opensearch-project/opensearch";
 import { ExtendedMetadata } from './types/metadata';
 
-export function getClient(region: string, endpoint: string) {
-    const signer = AwsSigv4Signer({
-        region,
-        service: 'aoss',
-        getCredentials: () => {
-            const credentialsProvider = defaultProvider({ profile: process.env.PROFILE });
-            return credentialsProvider();
-        }
-    });
-
+export function getClient(endpoint: string, username: string, password: string) {
     const client = new Client({
-        ...signer,
         requestTimeout: 60000, // Also used for refreshing credentials in advance
-        node: endpoint
+        node: endpoint,
+        auth: {
+            username: username,
+            password: password
+        }
     });
 
     return client;

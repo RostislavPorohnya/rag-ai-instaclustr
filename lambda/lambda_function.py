@@ -1,20 +1,31 @@
 import json
 import boto3
 import os
-from requests_aws4auth import AWS4Auth
 
-from langchain_aws import BedrockLLM
 from langchain_community.chat_models import BedrockChat
 from langchain.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.embeddings import BedrockEmbeddings
-from langchain_community.chat_message_histories import DynamoDBChatMessageHistory
-from opensearchpy import OpenSearch, RequestsHttpConnection
+from langchain_community.chat_message_histories import CassandraChatMessageHistory
+from cassandra.cluster import Cluster
+from opensearchpy import RequestsHttpConnection
 from langchain_community.vectorstores import OpenSearchVectorSearch
 
+
 def lambda_handler(event, context):
-    if "session_id" not in event or "prompt" not in event or "bedrock_model_id" not in event or "model_kwargs" not in event or "metadata" not in event or "memory_window" not in event:
+    session_id_missing = "session_id" not in event
+    prompt_missing = "prompt" not in event
+    bedrock_model_id_missing = "bedrock_model_id" not in event
+    model_kwargs_missing = "model_kwargs" not in event
+    metadata_missing = "metadata" not in event
+    memory_window_missing = "memory_window" not in event
+    if (session_id_missing or
+            prompt_missing or
+            bedrock_model_id_missing or
+            model_kwargs_missing or
+            metadata_missing or
+            memory_window_missing):
         return {
             'statusCode': 400,
             'body': "Invalid input. Missing required fields."
@@ -51,11 +62,41 @@ def lambda_handler(event, context):
             'statusCode': 400,
             'body': "Invalid input. os_host is empty."
         }
-    
+
+    cassandra_hosts = os.environ['cassandra_hosts']
+    if not cassandra_hosts:
+        return {
+            'statusCode': 400,
+            'body': "Invalid input. cassandra_hosts is empty."
+        }
+
+    os_username = os.environ['os_username']
+    if not os_username:
+        return {
+            'statusCode': 400,
+            'body': "Invalid input. os_username is empty."
+        }
+
+    os_password = os.environ['os_password']
+    if not os_password:
+        return {
+            'statusCode': 400,
+            'body': "Invalid input. os_password is empty."
+        }
+
     region = os.environ.get('AWS_REGION', 'us-east-1')  # Default to us-east-1 if AWS_REGION is not set
 
     # TODO implement
-    conversation = init_conversationchain(session_id, region, bedrock_model_id,model_kwargs, metadata, memory_window, os_host)
+    conversation = init_conversationchain(session_id,
+                                          region,
+                                          bedrock_model_id,
+                                          model_kwargs,
+                                          metadata,
+                                          memory_window,
+                                          os_host,
+                                          os_username,
+                                          os_password,
+                                          cassandra_hosts)
     response = conversation({"question": prompt})
     
     generated_text = response["answer"]
@@ -71,28 +112,31 @@ def lambda_handler(event, context):
         'statusCode': 200,
         'body': {"question": prompt.strip(), "answer": generated_text.strip(), "documents": doc_url}
     }
-    
-    
-def init_conversationchain(session_id,region, bedrock_model_id, model_kwargs, metadata, memory_window, host) -> ConversationalRetrievalChain:
+
+
+def init_conversationchain(session_id,
+                           region,
+                           bedrock_model_id,
+                           model_kwargs,
+                           metadata,
+                           memory_window,
+                           os_host,
+                           os_username,
+                           os_password,
+                           cassandra_hosts) -> ConversationalRetrievalChain:
     bedrock_embedding_model_id = "amazon.titan-embed-text-v2:0"
     
     bedrock_client = boto3.client(service_name='bedrock-runtime', region_name=region)
-    bedrock_embeddings = BedrockEmbeddings(model_id=bedrock_embedding_model_id,
-                                    client=bedrock_client)
-    
-    service = 'aoss'
-    credentials = boto3.Session().get_credentials()
-    awsauth = AWS4Auth(credentials.access_key, credentials.secret_key,
-                    region, service, session_token=credentials.token)
+    bedrock_embeddings = BedrockEmbeddings(model_id=bedrock_embedding_model_id, client=bedrock_client)
 
     new_db = OpenSearchVectorSearch(
         index_name="fsxnragvector-index",
         embedding_function=bedrock_embeddings,
-        opensearch_url=f'{host}:443',
-        http_auth=awsauth,
+        opensearch_url=f'{os_host}',
         use_ssl=True,
         verify_certs=True,
-        connection_class=RequestsHttpConnection
+        connection_class=RequestsHttpConnection,
+        http_auth=(os_username, os_password)
     )
 
     prompt_template = """Human: This is a friendly conversation between a human and an AI. 
@@ -112,7 +156,7 @@ def init_conversationchain(session_id,region, bedrock_model_id, model_kwargs, me
     Assistant:
     """
 
-    PROMPT = PromptTemplate(
+    prompt = PromptTemplate(
         template=prompt_template, input_variables=["question", "context"]
     )
 
@@ -132,7 +176,8 @@ def init_conversationchain(session_id,region, bedrock_model_id, model_kwargs, me
         retriever = new_db.as_retriever(search_kwargs={"filter": [{"term": {"metadata.acl.allowed": everyone_acl}}]})
     else:
         # retriever = new_db.as_retriever(search_kwargs={"filter": [{"term": {"metadata.year": metadata}}]})
-        retriever = new_db.as_retriever(search_kwargs={"filter": [{"terms": {"metadata.acl.allowed": [everyone_acl,metadata]}}]})
+        retriever = new_db.as_retriever(
+            search_kwargs={"filter": [{"terms": {"metadata.acl.allowed": [everyone_acl, metadata]}}]})
 
     llm = BedrockChat(
         model_id=bedrock_model_id,
@@ -140,7 +185,23 @@ def init_conversationchain(session_id,region, bedrock_model_id, model_kwargs, me
         streaming=True
     )
 
-    msg_history = DynamoDBChatMessageHistory(table_name='SessionTable', session_id=session_id, boto3_session=boto3.Session(region_name=region))
+    protocol_version = 5
+    cluster = Cluster(
+        [cp.strip() for cp in cassandra_hosts.split(",") if cp.strip()],
+        protocol_version=protocol_version,
+        connect_timeout=40
+    )
+    session = cluster.connect()
+
+    keyspace = "sessionkeyspace"
+    session.execute(f"""
+        CREATE KEYSPACE IF NOT EXISTS {keyspace}
+        WITH replication = {{ 'class': 'SimpleStrategy', 'replication_factor': '1' }}
+    """)
+
+    msg_history = CassandraChatMessageHistory(session_id=session_id,
+                                              session=session,
+                                              keyspace=keyspace)
 
     memory = ConversationBufferMemory(
         memory_key="chat_history",
@@ -155,7 +216,7 @@ def init_conversationchain(session_id,region, bedrock_model_id, model_kwargs, me
         return_source_documents=True, 
         verbose=True,
         memory=memory,
-        combine_docs_chain_kwargs={"prompt":PROMPT},
+        combine_docs_chain_kwargs={"prompt": prompt},
     )
 
     return conversation
