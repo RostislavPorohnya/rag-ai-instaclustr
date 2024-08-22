@@ -1,10 +1,8 @@
-
 provider "aws" {
   region = var.aws_region
 }
 
 data "aws_availability_zones" "available" {}
-
 
 resource "random_string" "suffix" {
   length  = 8
@@ -24,5 +22,4 @@ module "vpc" {
   single_nat_gateway   = true
   enable_dns_hostnames = true
   enable_dns_support   = true
-
 }

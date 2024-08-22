@@ -1,3 +1,12 @@
+variable "api_key" {
+  type = string
+  default = "6b4ff36da2547a5f91434ac5aec05c37"
+}
+
+variable "instaclustr_username" {
+  type = string
+  default = "rostyslp"
+}
 
 variable "vpc_cidr" {
   default     = "10.0.0.0/16"

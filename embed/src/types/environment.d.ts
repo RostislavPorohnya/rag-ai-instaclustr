@@ -6,6 +6,9 @@ declare global {
             PROFILE: string;
             REGION: string;
             OPEN_SEARCH_SERVERLESS_COLLECTION_NAME: string;
+            OPEN_SEARCH_HOSTNAME: string;
+            OPENSEARCH_USERNAME: string;
+            OPENSEARCH_PASSWORD: string;
             BEDROCK_EMBEDDING_MODEL_ID: string;
             BEDROCK_EMBEDDING_MODEL_OUTPUT_VECTOR_SIZE: string;
             TEXT_SPLITTER_CHUNK_SIZE: string;
